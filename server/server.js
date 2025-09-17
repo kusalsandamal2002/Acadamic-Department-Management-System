@@ -13,8 +13,8 @@ app.get("/", (req, res) => {
 // Example API route
 app.get("/api/departments", (req, res) => {
   res.json([
-    { id: 1, name: "Computer Science", head: "Dr. Perera" },
-    { id: 2, name: "Electrical Engineering", head: "Dr. Silva" },
+    { id: 1, name: "Computer Science.", head: "Dr. Perera" },
+    { id: 2, name: "Electrical Engineering.", head: "Dr. Silva" },
   ]);
 });
 
