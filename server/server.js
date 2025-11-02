@@ -1,24 +1,27 @@
 const express = require("express");
-const app = express();
-const port = 3000;
+const cors = require("cors");
+const dotenv = require("dotenv");
+dotenv.config();
 
-// Middleware to parse JSON
+const authRoutes = require("./routes/authRoutes");
+const eventRoutes = require("./routes/eventRoutes");
+const courseRoutes = require("./routes/courseRoutes");
+const hallRoutes = require("./routes/hallRoutes");
+const profileRoutes = require("./routes/profileRoutes");
+
+const app = express();
+app.use(cors());
 app.use(express.json());
 
-// Home route
+app.use("/api/auth", authRoutes);
+app.use("/api/events", eventRoutes);
+app.use("/api/courses", courseRoutes);
+app.use("/api/halls", hallRoutes);
+app.use("/api/staff", profileRoutes);
+
 app.get("/", (req, res) => {
-  res.send("Welcome to My Express App!");
+  res.send("✅ Academic Management System API running...");
 });
 
-// Example API route
-app.get("/api/departments", (req, res) => {
-  res.json([
-    { id: 1, name: "Computer Science.", head: "Dr. Perera" },
-    { id: 2, name: "Electrical Engineering.", head: "Dr. Silva" },
-  ]);
-});
-
-// Start server
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-});
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

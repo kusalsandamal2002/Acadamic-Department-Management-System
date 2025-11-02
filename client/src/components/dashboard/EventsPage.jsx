@@ -1,4 +1,3 @@
-// src/pages/EventsPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { FaPlus, FaEdit, FaTrash, FaCalendarAlt, FaTimes } from "react-icons/fa";
@@ -35,6 +34,12 @@ export default function EventsPage() {
   useEffect(() => {
     const fetchEvents = async () => {
       setLoading(true);
+      if (!token) {
+        console.error("No token available.");
+        setLoading(false);
+        return;
+      }
+
       try {
         const { data } = await axios.get(`${API_BASE}/events`, {
           headers: { Authorization: token },
@@ -77,7 +82,8 @@ export default function EventsPage() {
     e.preventDefault();
     if (!form.title || !form.date || !form.time) return;
 
-    setSaving(true);
+    setSaving(true); // Set saving to true when the save process starts
+
     const payload = {
       title: form.title,
       location: form.location,
@@ -88,49 +94,35 @@ export default function EventsPage() {
     };
 
     try {
+      let updatedEvents;
       if (form.id) {
-        // update
-        let updated;
-        try {
-          const { data } = await axios.put(`${API_BASE}/events/${form.id}`, payload, {
-            headers: { Authorization: token },
-          });
-          updated = data;
-        } catch {
-          // fallback local
-          updated = { id: form.id, ...payload };
-          const copy = events.map((ev) => (ev.id === form.id ? updated : ev));
-          setEvents(copy);
-          localStorage.setItem("eventsCache", JSON.stringify(copy));
-          setShowModal(false);
-          setSaving(false);
-          return;
-        }
-        const copy = events.map((ev) => (ev.id === form.id ? updated : ev));
-        setEvents(copy);
-        localStorage.setItem("eventsCache", JSON.stringify(copy));
+        // If updating an existing event
+        const { data } = await axios.put(`${API_BASE}/events/${form.id}`, payload, {
+          headers: { Authorization: token },
+        });
+        updatedEvents = data;  // If successful, get updated event data
       } else {
-        // create
-        let created;
-        try {
-          const { data } = await axios.post(`${API_BASE}/events`, payload, {
-            headers: { Authorization: token },
-          });
-          created = data;
-        } catch {
-          // fallback local
-          created = { id: crypto.randomUUID(), ...payload };
-        }
-        const copy = [...events, created];
-        setEvents(copy);
-        localStorage.setItem("eventsCache", JSON.stringify(copy));
+        // If creating a new event
+        const { data } = await axios.post(`${API_BASE}/events`, payload, {
+          headers: { Authorization: token },
+        });
+        updatedEvents = data; // New event created successfully
       }
-      setShowModal(false);
-      setForm(emptyForm());
+
+      // Update the events list in the state
+      const updatedEventsList = form.id
+        ? events.map((ev) => (ev.id === form.id ? updatedEvents : ev))  // Update the event if editing
+        : [...events, updatedEvents];  // Add the new event if creating
+
+      setEvents(updatedEventsList);  // Update the events state
+      localStorage.setItem("eventsCache", JSON.stringify(updatedEventsList));  // Store the updated events list in localStorage
+
+      setShowModal(false); // Close the modal
+      setForm(emptyForm()); // Reset form fields
     } catch (err) {
       console.error("Save failed:", err?.response?.data || err.message);
     } finally {
-      setSaving(false);
+      setSaving(false); // Set saving to false when save process is finished
     }
   };
 
@@ -138,13 +130,9 @@ export default function EventsPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this event?")) return;
     try {
-      try {
-        await axios.delete(`${API_BASE}/events/${id}`, {
-          headers: { Authorization: token },
-        });
-      } catch {
-        // ignore if API down; proceed with local delete
-      }
+      await axios.delete(`${API_BASE}/events/${id}`, {
+        headers: { Authorization: token },
+      });
       const copy = events.filter((e) => e.id !== id);
       setEvents(copy);
       localStorage.setItem("eventsCache", JSON.stringify(copy));
@@ -209,19 +197,20 @@ export default function EventsPage() {
               <th className="px-4 py-3">Date</th>
               <th className="px-4 py-3">Time</th>
               <th className="px-4 py-3">Location</th>
+              <th className="px-4 py-3">Description</th>
               <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td className="px-4 py-6 text-gray-500" colSpan={5}>
+                <td className="px-4 py-6 text-gray-500" colSpan={6}>
                   Loading events…
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-gray-500" colSpan={5}>
+                <td className="px-4 py-6 text-gray-500" colSpan={6}>
                   No events found.
                 </td>
               </tr>
@@ -237,6 +226,8 @@ export default function EventsPage() {
                     <td className="px-4 py-3">{d}</td>
                     <td className="px-4 py-3">{t}</td>
                     <td className="px-4 py-3">{ev.location || "-"}</td>
+                    {/* Show the Description in the table */}
+                    <td className="px-4 py-3">{ev.description || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button

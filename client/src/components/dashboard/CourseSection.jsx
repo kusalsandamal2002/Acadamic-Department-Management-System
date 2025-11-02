@@ -1,8 +1,7 @@
+// src/components/CourseSection.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-
-const STORAGE_KEY = "uoc_courses";
 
 /** Compare names case-insensitively */
 const sameName = (a = "", b = "") =>
@@ -27,12 +26,13 @@ export default function CourseSection() {
   // ---- ui ----
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  // ---------- Load current user: server first, then cache ----------
+  // ---------- Load current user: server first, then (optional) cache ----------
   useEffect(() => {
     const token = localStorage.getItem("token");
 
-    // If no token at all -> logout
     if (!token) {
       localStorage.removeItem("userData");
       navigate("/login");
@@ -41,7 +41,7 @@ export default function CourseSection() {
 
     axios
       .get("http://localhost:5000/api/auth/profile", {
-        headers: { Authorization: token }, // raw token (middleware expects this)
+        headers: { Authorization: token }, // your verifyToken expects raw token
       })
       .then((res) => {
         const data = {
@@ -49,28 +49,24 @@ export default function CourseSection() {
           role: res?.data?.role || "Lecturer",
         };
         setUserData(data);
-        localStorage.setItem("userData", JSON.stringify(data)); // cache
+        localStorage.setItem("userData", JSON.stringify(data));
       })
-      .catch((err) => {
-        console.error("Profile fetch failed:", err?.response?.data || err.message);
-        // fallback to local cache if exists
+      .catch(() => {
+        // fallback to local cache if exists; else force login
         const cached = localStorage.getItem("userData");
         if (cached) {
           try {
             const parsed = JSON.parse(cached);
-            const data = {
+            setUserData({
               name: parsed?.name || "Lecturer",
               role: parsed?.role || "Lecturer",
-            };
-            setUserData(data);
+            });
           } catch {
-            // invalid cache -> logout
             localStorage.removeItem("token");
             localStorage.removeItem("userData");
             navigate("/login");
           }
         } else {
-          // invalid token & no cache -> logout
           localStorage.removeItem("token");
           localStorage.removeItem("userData");
           navigate("/login");
@@ -84,17 +80,26 @@ export default function CourseSection() {
     setFormData((p) => ({ ...p, lecturerName: userData.name || "" }));
   }, [userData?.name]);
 
-  // ---------- Load / save courses ----------
-  useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      setCourses(stored);
-    } catch {}
-  }, []);
+  // ---------- Load courses from backend ----------
+  const fetchCourses = () => {
+    setLoadingCourses(true);
+    setError("");
+    axios
+      .get("http://localhost:5000/api/courses", {
+        headers: { Authorization: localStorage.getItem("token") },
+      })
+      .then((res) => setCourses(Array.isArray(res.data) ? res.data : []))
+      .catch((err) => {
+        console.error("Failed to load courses:", err?.response?.data || err.message);
+        setError("Cannot load courses from server.");
+      })
+      .finally(() => setLoadingCourses(false));
+  };
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(courses));
-  }, [courses]);
+    fetchCourses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---------- Handlers ----------
   const handleChange = (e) => {
@@ -133,48 +138,62 @@ export default function CourseSection() {
       return;
     }
 
-    // Duplicate course number prevention
+    // Optional: prevent duplicate courseNumber on the client for better UX
     const duplicate = courses.some(
       (c) =>
-        c.courseNumber.trim().toLowerCase() === courseNumber.trim().toLowerCase() &&
-        (!editingId || c.id !== editingId)
+        String(c.courseNumber).trim().toLowerCase() ===
+          courseNumber.trim().toLowerCase() && (!editingId || c.id !== editingId)
     );
     if (duplicate) {
       setError("This course number already exists.");
       return;
     }
 
+    setSubmitting(true);
+
     if (editingId) {
+      // Ownership guard (also should be enforced on backend if you want stronger security)
       const target = courses.find((c) => c.id === editingId);
       if (target && !sameName(target.lecturerName, userData.name)) {
+        setSubmitting(false);
         setError("Only the course owner can update this course.");
         return;
       }
-      setCourses((prev) =>
-        prev.map((c) =>
-          c.id === editingId
-            ? { ...c, courseNumber: courseNumber.trim(), courseName: courseName.trim() }
-            : c
-        )
-      );
-      setSuccess("✅ Course updated successfully.");
-    } else {
-      const newCourse = {
-        id: Date.now(),
-        courseNumber: courseNumber.trim(),
-        courseName: courseName.trim(),
-        lecturerName: userData.name, // stamp owner
-        createdAt: new Date().toISOString(),
-      };
-      setCourses((prev) => [newCourse, ...prev]);
-      setSuccess("✅ Course added successfully.");
-    }
 
-    resetForm();
+      axios
+        .put(`http://localhost:5000/api/courses/${editingId}`, formData, {
+          headers: { Authorization: localStorage.getItem("token") },
+        })
+        .then((res) => {
+          const updated = res.data; // { id, courseNumber, courseName, lecturerName }
+          setCourses((prev) =>
+            prev.map((c) => (c.id === editingId ? updated : c))
+          );
+          setSuccess("✅ Course updated successfully.");
+          resetForm();
+        })
+        .catch((err) => {
+          setError(err.response?.data?.error || "Update failed.");
+        })
+        .finally(() => setSubmitting(false));
+    } else {
+      axios
+        .post("http://localhost:5000/api/courses", formData, {
+          headers: { Authorization: localStorage.getItem("token") },
+        })
+        .then((res) => {
+          const created = res.data; // { id, courseNumber, courseName, lecturerName }
+          setCourses((prev) => [created, ...prev]);
+          setSuccess("✅ Course added successfully.");
+          resetForm();
+        })
+        .catch((err) => setError(err.response?.data?.error || "Add failed."))
+        .finally(() => setSubmitting(false));
+    }
   };
 
   const handleEdit = (c) => {
-    if (!sameName(c.lecturerName, userData.name)) return; // guard
+    if (!sameName(c.lecturerName, userData.name)) return;
     setFormData({
       courseNumber: c.courseNumber,
       courseName: c.courseName,
@@ -192,13 +211,22 @@ export default function CourseSection() {
       setError("Only the course owner can delete this course.");
       return;
     }
-    setCourses((prev) => prev.filter((c) => c.id !== id));
-    setSuccess("🗑️ Course deleted successfully.");
-    if (editingId === id) resetForm();
+    setSubmitting(true);
+    axios
+      .delete(`http://localhost:5000/api/courses/${id}`, {
+        headers: { Authorization: localStorage.getItem("token") },
+      })
+      .then(() => {
+        setCourses((prev) => prev.filter((c) => c.id !== id));
+        setSuccess("🗑️ Course deleted successfully.");
+        if (editingId === id) resetForm();
+      })
+      .catch((err) => setError(err.response?.data?.error || "Delete failed."))
+      .finally(() => setSubmitting(false));
   };
 
   const sortedCourses = useMemo(
-    () => [...courses].sort((a, b) => a.courseNumber.localeCompare(b.courseNumber)),
+    () => [...courses].sort((a, b) => String(a.courseNumber).localeCompare(String(b.courseNumber))),
     [courses]
   );
 
@@ -277,10 +305,12 @@ export default function CourseSection() {
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={loadingUser}
+            disabled={loadingUser || submitting}
             className="bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-semibold py-2 px-6 rounded-md transition"
           >
-            {editingId ? "Update Course" : "Add Course"}
+            {submitting
+              ? (editingId ? "Updating…" : "Adding…")
+              : (editingId ? "Update Course" : "Add Course")}
           </button>
           {editingId && (
             <button
@@ -291,14 +321,25 @@ export default function CourseSection() {
               Cancel Edit
             </button>
           )}
+          <button
+            type="button"
+            onClick={fetchCourses}
+            disabled={loadingCourses}
+            className="border border-green-600 text-green-700 hover:bg-green-50 font-semibold py-2 px-4 rounded-md transition"
+            title="Reload list from server"
+          >
+            {loadingCourses ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
       </form>
 
       {/* Course Table */}
       <section className="max-w-5xl mx-auto mt-10">
         <h3 className="text-2xl font-bold text-gray-800 mb-4">Courses List</h3>
-        {sortedCourses.length === 0 ? (
-          <p className="text-gray-600">No courses added yet.</p>
+        {loadingCourses && courses.length === 0 ? (
+          <p className="text-gray-600">Loading courses…</p>
+        ) : sortedCourses.length === 0 ? (
+          <p className="text-gray-600">No courses found.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -334,7 +375,7 @@ export default function CourseSection() {
                           </button>
                           <span className="text-gray-300">|</span>
                           <button
-                            onClick={() => handleDelete(c.id)}
+                            onClick={() => owner && handleDelete(c.id)}
                             className={
                               owner
                                 ? "text-red-600 hover:underline"

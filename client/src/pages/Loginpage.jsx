@@ -1,3 +1,4 @@
+// src/pages/LoginPage.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -23,16 +24,21 @@ function LoginPage() {
 
       const data = await res.json();
 
-      if (res.ok) {
-        localStorage.setItem("token", data.token);
-
-        // Role-based redirection
-        if (data.role === "superadmin") navigate("/superadmin");
-        else if (data.role === "lecturer") navigate("/lecturer");
-        else if (data.role === "student") navigate("/student");
-      } else {
-        setMessage(data.message || "Login failed!");
+      if (!res.ok) {
+        // backend sends { error: "..." }
+        setMessage(data.error || "Login failed!");
+        return;
       }
+
+      // backend sends { token, user: { id, name, email, role } }
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("userData", JSON.stringify(data.user));
+
+      const role = data.user?.role?.toLowerCase?.();
+      if (role === "superadmin") navigate("/superadmin");
+      else if (role === "lecturer") navigate("/lecturer");
+      else if (role === "student") navigate("/student");
+      else navigate("/"); // fallback
     } catch (error) {
       console.error(error);
       setMessage("Server error. Try again later.");
@@ -64,7 +70,6 @@ function LoginPage() {
             required
             className="w-full p-2 border rounded-md"
           />
-
           <button
             type="submit"
             className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-md"
